@@ -9,27 +9,34 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 
 	docopt "github.com/docopt/docopt-go"
 )
 
 var (
-	usage = `cryptovim
+	version = "1.0"
+	usage   = `cryptoedit ` + version + `
 
 Usage:
-	cryptovim -s <file>
-	cryptovim -r <file> [<recipient>]
+    cryptoedit [options] -s <file>
+    cryptoedit [options] <file> [-r <recipient>...]
+    cryptoedit --help
+    cryptoedit --version
 
 Options:
-	-s --symmetrical  use --symmetrical gpg flag for encription
-	-r --recipient    use targeted gpg encription
-	<recipient>       email for targeted encryption [default: git-email]
-	<file>            encrypted file path to edit
+    -s --symmetrical  use --symmetrical gpg flag for encription
+    -r <recipient>    use targeted gpg encription. If no one is specified,
+                      git email would be used to encrypt just for yourself.
+    -g <gpg>          gpg binary to use [default: gpg2]
+    <file>            encrypted file path to edit
+    -v --version      show version
+    -h --help         show this screen
 `
 )
 
-func decrypt(encryptedPath string) (string, string, error) {
-	tmpFile, err := ioutil.TempFile(os.TempDir(), "cryptovim")
+func decrypt(encryptedPath, gpgBinary string) (string, string, error) {
+	tmpFile, err := ioutil.TempFile(os.TempDir(), "cryptoedit")
 	if err != nil {
 		return "", "", fmt.Errorf("can't create tmp file: %s", err)
 	}
@@ -49,7 +56,7 @@ func decrypt(encryptedPath string) (string, string, error) {
 		return "", "", fmt.Errorf("can't stat file %s: %s", encryptedPath, err)
 	}
 
-	cmd := exec.Command("gpg", "-d", encryptedPath)
+	cmd := exec.Command(gpgBinary, "-d", encryptedPath)
 
 	md5Sum := md5.New()
 	writer := io.MultiWriter(tmpFile, md5Sum)
@@ -65,6 +72,7 @@ func decrypt(encryptedPath string) (string, string, error) {
 }
 
 func rmDecrypted(path string) {
+	os.Remove(path)
 }
 
 func editFile(path string) (string, error) {
@@ -105,6 +113,7 @@ func encryptFile(decryptedPath string, args map[string]interface{}) error {
 	var (
 		symmetrical   = args["--symmetrical"].(bool)
 		encryptedPath = args["<file>"].(string)
+		gpgBinary     = args["-g"].(string)
 		cmdArgs       = []string{
 			"--output",
 			encryptedPath,
@@ -117,17 +126,21 @@ func encryptFile(decryptedPath string, args map[string]interface{}) error {
 	case symmetrical:
 		cmdArgs = append(cmdArgs, []string{"-c", decryptedPath}...)
 	default:
-		realRecipient, err := makeRecipient(args["<recipient>"].(string))
+		recipients, err := makeRecipients(args["-r"].([]string))
 		if err != nil {
 			return fmt.Errorf("can't determine email to encrypt")
 		}
 
-		cmdArgs = append(cmdArgs, []string{
-			"--encrypt", "--recipient", realRecipient, decryptedPath,
-		}...)
+		cmdArgs = append(cmdArgs, "--encrypt")
+
+		for _, recipient := range recipients {
+			cmdArgs = append(cmdArgs, "--recipient", recipient)
+		}
+
+		cmdArgs = append(cmdArgs, decryptedPath)
 	}
 
-	cmd := exec.Command("gpg", cmdArgs...)
+	cmd := exec.Command(gpgBinary, cmdArgs...)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 
@@ -142,9 +155,9 @@ func encryptFile(decryptedPath string, args map[string]interface{}) error {
 	return nil
 }
 
-func makeRecipient(recipient string) (string, error) {
-	if recipient != "git-email" {
-		return recipient, nil
+func makeRecipients(recipients []string) ([]string, error) {
+	if len(recipients) > 0 {
+		return recipients, nil
 	}
 
 	cmd := exec.Command("git", "config", "--get", "user.email")
@@ -154,21 +167,30 @@ func makeRecipient(recipient string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		return "", fmt.Errorf("can't get git email: %s", err)
+		return nil, fmt.Errorf("can't get git email: %s", err)
 	}
 
-	return buff.String(), nil
+	email := strings.Trim(buff.String(), " \n")
+
+	return []string{email}, nil
 }
 
 func main() {
-	args, err := docopt.Parse(usage, nil, true, "cryptovim 1.0", false, true)
+	args, err := docopt.Parse(
+		usage,
+		nil,
+		true,
+		"cryptoedit "+version,
+		false,
+		true,
+	)
 	if err != nil {
 		log.Fatalf("can't parse usage: %s", err)
 	}
 
 	encryptedPath := args["<file>"].(string)
 
-	tmpPath, md5Sum, err := decrypt(encryptedPath)
+	tmpPath, md5Sum, err := decrypt(encryptedPath, args["-g"].(string))
 	if err != nil {
 		log.Fatalf("can't decrypt file %s: %s", encryptedPath, err)
 	}
