@@ -177,12 +177,7 @@ func makeRecipients(recipients []string) ([]string, error) {
 
 func main() {
 	args, err := docopt.Parse(
-		usage,
-		nil,
-		true,
-		"cryptoedit "+version,
-		false,
-		true,
+		usage, nil, true, "cryptoedit "+version, false, true,
 	)
 	if err != nil {
 		log.Fatalf("can't parse usage: %s", err)
