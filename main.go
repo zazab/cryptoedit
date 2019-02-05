@@ -11,7 +11,7 @@ import (
 	"os/exec"
 	"strings"
 
-	docopt "github.com/docopt/docopt-go"
+	"github.com/docopt/docopt-go"
 )
 
 var (
